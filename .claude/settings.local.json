@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx --yes create-next-app@latest . --typescript --tailwind --app --src-dir --import-alias \"@/*\" --use-npm --eslint --no-turbopack --disable-git)",
+      "Bash(rm -rf C:/Users/user/AppData/Local/Temp/claude/C--Home-App/a352aadf-83da-4cfb-999c-2d46dd7c209b/scratchpad/risu-home)",
+      "Bash(npx --yes create-next-app@latest risu-home --typescript --tailwind --app --src-dir --import-alias \"@/*\" --use-npm --eslint --no-turbopack --disable-git)",
+      "Bash(npm install *)",
+      "Bash(mkdir -p public/icons)",
+      "Bash(node -e ' *)",
+      "Bash(npx tsc *)",
+      "Bash(rm -rf .next)",
+      "Bash(npm run *)",
+      "Bash(git mv *)",
+      "Bash(mv src/middleware.ts src/proxy.ts)",
+      "Bash(supabase projects *)",
+      "Bash(supabase db *)",
+      "Bash(supabase migration *)",
+      "Bash(supabase init *)",
+      "Bash(SERWIST_SUPPRESS_TURBOPACK_WARNING=1 npm run build)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} -> %{redirect_url}\\\\n\" \"http://localhost:3000/\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" \"http://localhost:3000/login\")",
+      "Bash(curl -s \"http://localhost:3000/login\")",
+      "Bash(curl -s -o /dev/null \"http://localhost:3000/login\")",
+      "Bash(npx playwright *)",
+      "Bash(curl -s -o /dev/null -w \"/login -> %{http_code}\\\\n\" \"http://localhost:3000/login\")",
+      "Bash(node *)"
+    ]
+  }
+}
