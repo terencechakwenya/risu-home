@@ -33,7 +33,7 @@ test("offline receipt capture syncs on reconnect", async ({ page, context }) => 
   await expect(page.getByText(/Offline/)).toBeVisible();
 
   // 4. Enter an amount, pick the envelope, add a note, Save.
-  await page.getByPlaceholder("247.50").fill(amount);
+  await page.getByPlaceholder("0").fill(amount);
   await page.getByRole("button", { name: TEST_ENVELOPE_NAME }).click();
   await page.getByPlaceholder("Choppies").fill(note);
   await page.getByRole("button", { name: /Save/ }).click();
