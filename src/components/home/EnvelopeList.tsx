@@ -1,6 +1,7 @@
 import { Sparkles } from "lucide-react";
 import type { Envelope } from "@/lib/domain/types";
 import { barColor, fmt, guidanceText } from "@/lib/domain/format";
+import { weeklySpendThisWeek } from "@/lib/domain/budget";
 
 // A stack of envelope cards: name, spent/budget, per-week guidance line, and the
 // green→amber→red progress bar. `markId` tags one card with data-tour for the
@@ -27,8 +28,10 @@ export function EnvelopeList({
         const g = guidanceText(e);
 
         // "This week" framing for weekly/hybrid lines — a small, manageable number.
+        // For hybrids, the month-end base shop is reserved as the top slice of the
+        // budget, so only the weekly portion of this week's spend drives this bar.
         const weekly = (e.is_weekly || e.is_hybrid) && e.weekly_rate > 0;
-        const spentWeek = weekSpend?.[e.id] ?? 0;
+        const spentWeek = weeklySpendThisWeek(e, weekSpend?.[e.id] ?? 0);
         const leftWeek = Math.max(0, e.weekly_rate - spentWeek);
         const weekRatio = e.weekly_rate ? spentWeek / e.weekly_rate : 0;
         const showWeek = weekly && !!weekSpend;
