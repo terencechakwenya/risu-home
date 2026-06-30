@@ -7,6 +7,7 @@ import { db } from "@/lib/db/dexie";
 import { saveCapture, undoCapture } from "@/lib/db/receipts";
 import { runPush } from "@/lib/sync";
 import { compressPhoto } from "@/lib/photo";
+import { clearDraft, loadDraft, saveDraft } from "@/lib/draft";
 import { celebrate } from "@/lib/confetti";
 import { savedCheer, FIRST_RECEIPT_TITLE, FIRST_RECEIPT_BODY } from "@/lib/domain/cheer";
 import { fmt } from "@/lib/domain/format";
@@ -86,6 +87,29 @@ export function AddReceipt({
     if (!saved) amountRef.current?.focus();
   }, [saved]);
 
+  // Recover an in-progress entry left behind by a reload (e.g. the tab was
+  // killed mid photo-capture on a low-memory phone). Done in a mount effect, not
+  // a lazy initial value, so the server and the first client render agree on an
+  // empty form and hydration stays clean; the restore then runs once on the
+  // client. This is a one-time read from an external store (localStorage), which
+  // is the intended exception to the no-setState-in-effect rule.
+  useEffect(() => {
+    const d = loadDraft();
+    if (!d) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- one-time draft recovery from localStorage */
+    setAmount(d.amount);
+    setCat(d.cat);
+    setNote(d.note);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  // Persist on every change. Writing from the field handlers (below) keeps the
+  // three values merged and correct without an effect that could race the
+  // restore above and clobber it with empty initial state.
+  function persistDraft(next: Partial<{ amount: string; cat: string | null; note: string }>) {
+    saveDraft({ amount, cat, note, ...next });
+  }
+
   const photoPreview = useMemo(
     () => (photoFile ? URL.createObjectURL(photoFile) : null),
     [photoFile],
@@ -103,6 +127,7 @@ export function AddReceipt({
     setNote("");
     setPhotoFile(null);
     setSaved(null);
+    clearDraft();
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -151,6 +176,9 @@ export function AddReceipt({
         receipt = await saveCapture({ ...fields, photoBlob: null });
       }
       lastSaved.current = receipt;
+      // The entry is safely in Dexie now — drop the recovery draft so a later
+      // reload doesn't resurrect an already-saved receipt.
+      clearDraft();
       // Fire-and-forget flush; no-ops when offline, retries on reconnect.
       void runPush();
 
@@ -260,7 +288,10 @@ export function AddReceipt({
             type="number"
             inputMode="decimal"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(e) => {
+              setAmount(e.target.value);
+              persistDraft({ amount: e.target.value });
+            }}
             placeholder="0"
             className="w-full text-center text-4xl font-semibold text-slate-800 outline-none border border-slate-200 rounded-xl px-3 py-3 focus:border-navy"
           />
@@ -274,7 +305,10 @@ export function AddReceipt({
               return (
                 <button
                   key={e.id}
-                  onClick={() => setCat(e.id)}
+                  onClick={() => {
+                    setCat(e.id);
+                    persistDraft({ cat: e.id });
+                  }}
                   className="px-3 py-1.5 rounded-full text-[12px] border transition"
                   style={
                     active
@@ -298,7 +332,10 @@ export function AddReceipt({
           <div className="text-[12px] text-slate-500 mb-1.5">Shop / note (optional)</div>
           <input
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e) => {
+              setNote(e.target.value);
+              persistDraft({ note: e.target.value });
+            }}
             placeholder="Choppies"
             className="w-full text-[14px] text-slate-700 outline-none border border-slate-200 rounded-lg px-3 py-2 focus:border-slate-400"
           />
