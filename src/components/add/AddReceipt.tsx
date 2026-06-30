@@ -115,6 +115,14 @@ export function AddReceipt({
     [photoFile],
   );
 
+  // Revoke the preview's object URL when the photo changes or the screen
+  // unmounts. Without this, each capture leaks a URL that pins its (multi-MB)
+  // blob in memory — death by a thousand cuts on a low-RAM phone.
+  useEffect(() => {
+    if (!photoPreview) return;
+    return () => URL.revokeObjectURL(photoPreview);
+  }, [photoPreview]);
+
   // Enable as soon as there's a positive amount and an envelope. Photo is
   // optional, and we deliberately don't gate on `member`: a low-memory event
   // can transiently wipe the Dexie-backed live query, and we don't want that to
@@ -182,8 +190,9 @@ export function AddReceipt({
       // Fire-and-forget flush; no-ops when offline, retries on reconnect.
       void runPush();
 
-      // Reward good behaviour — never blocks the save. Pearl only.
-      if (isPearl) celebrate({ particles: firstEver ? 150 : 90 });
+      // Release the original (multi-MB) camera File now that the compressed
+      // blob is safely in Dexie — don't hold it through the success screen.
+      setPhotoFile(null);
 
       setSaved({
         envelope: envelopes.find((e) => e.id === cat)?.name ?? "",
@@ -191,6 +200,14 @@ export function AddReceipt({
         firstEver,
         cheer: savedCheer(),
       });
+
+      // Reward good behaviour — never blocks the save. Pearl only. Deferred to
+      // the next frame so the success screen (and the freeing of the form's
+      // inputs + photo preview) paints before the confetti canvas allocates,
+      // keeping peak memory lower on low-RAM phones.
+      if (isPearl) {
+        requestAnimationFrame(() => celebrate({ particles: firstEver ? 150 : 90 }));
+      }
     } catch (err) {
       // Keep the entered amount/envelope so the user can retry; the finally
       // re-enables the button so the form is never left stuck.

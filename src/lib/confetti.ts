@@ -8,6 +8,13 @@ export function celebrate(opts?: { particles?: number; originY?: number }) {
   if (typeof window === "undefined") return;
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
 
+  // Drop the celebration entirely on very low-RAM devices. A full-screen canvas
+  // plus an RAF animation is pure overhead the save doesn't need, and on a
+  // ~1 GiB phone it's exactly the kind of allocation that tips the tab into the
+  // OS low-memory toast. deviceMemory is approximate GiB (Chrome/Android).
+  const deviceMemory = (navigator as { deviceMemory?: number }).deviceMemory;
+  if (typeof deviceMemory === "number" && deviceMemory <= 1) return;
+
   const canvas = document.createElement("canvas");
   canvas.style.cssText =
     "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:60";
@@ -22,7 +29,10 @@ export function celebrate(opts?: { particles?: number; originY?: number }) {
 
   const cx = canvas.width / 2;
   const cy = canvas.height * (opts?.originY ?? 0.4);
-  const N = opts?.particles ?? 90;
+  // Clamp particle count on memory-constrained devices (≤2 GiB) — keeps the
+  // burst cheap without dropping it on mid-range phones.
+  const lowMem = typeof deviceMemory === "number" && deviceMemory <= 2;
+  const N = Math.min(opts?.particles ?? 90, lowMem ? 40 : 200);
 
   const parts = Array.from({ length: N }, () => {
     const angle = Math.random() * Math.PI * 2;
