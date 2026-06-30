@@ -19,6 +19,39 @@ interface SavedState {
   cheer: string;
 }
 
+// Cap how long photo compression may run. A low-memory phone can kill or stall
+// the compression web worker so its promise never settles; without this bound
+// the save would hang forever and leave the Save button stuck disabled.
+const PHOTO_COMPRESS_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+// Prepare the optional receipt photo without ever blocking the save. On any
+// failure or timeout, fall back to the original file (storing it skips the
+// memory-heavy canvas decode); the worst case is simply no photo. Never rejects.
+async function preparePhoto(file: File | null): Promise<Blob | null> {
+  if (!file) return null;
+  try {
+    return await withTimeout(compressPhoto(file), PHOTO_COMPRESS_TIMEOUT_MS);
+  } catch {
+    return file;
+  }
+}
+
 // Add receipt: amount → envelope chip → photo → note → save. The save is fully
 // local (Dexie + outbox) so it works with no connection; a flush is kicked off
 // when online. Envelopes + member come from the offline cache, falling back to
@@ -58,7 +91,11 @@ export function AddReceipt({
     [photoFile],
   );
 
-  const canSave = !!parseFloat(amount) && !!cat && !!member && !saving;
+  // Enable as soon as there's a positive amount and an envelope. Photo is
+  // optional, and we deliberately don't gate on `member`: a low-memory event
+  // can transiently wipe the Dexie-backed live query, and we don't want that to
+  // leave the button stuck disabled. `onSave` still guards member before writing.
+  const canSave = parseFloat(amount) > 0 && !!cat && !saving;
 
   function reset() {
     setAmount("");
@@ -78,22 +115,41 @@ export function AddReceipt({
 
   async function onSave() {
     const amt = parseFloat(amount);
-    if (!amt || !cat || !member) return;
+    if (!(amt > 0) || !cat) return;
     setSaving(true);
     try {
-      const isPearl = member.role === "pearl";
+      // `member` is normally hydrated, but a low-memory event can transiently
+      // empty the live query. Fall back to a direct read before giving up.
+      const activeMember = member ?? (await db.members.toArray())[0];
+      if (!activeMember) return;
+
+      const isPearl = activeMember.role === "pearl";
       // First-ever receipt: no server history and nothing logged on this device yet.
       const firstEver = isPearl && !pearlHadReceipts && (await db.receipts.count()) === 0;
 
-      const photoBlob = photoFile ? await compressPhoto(photoFile) : null;
-      const receipt = await saveCapture({
-        household_id: member.household_id,
+      // The photo is optional and must NEVER block the save. Compression decodes
+      // the image on a canvas/web-worker — the memory-heavy step a low-memory
+      // phone can hang or kill — so it's bounded by a timeout and falls back to
+      // the original file. preparePhoto never rejects.
+      const photoBlob = await preparePhoto(photoFile);
+
+      const fields = {
+        household_id: activeMember.household_id,
         envelope_id: cat,
         amount: amt,
         note,
-        logged_by: member.role,
-        photoBlob,
-      });
+        logged_by: activeMember.role,
+      };
+      // If persisting the photo blob fails (e.g. IndexedDB under memory pressure),
+      // save the receipt without it rather than losing the entry.
+      let receipt: Receipt;
+      try {
+        receipt = await saveCapture({ ...fields, photoBlob });
+      } catch (err) {
+        if (!photoBlob) throw err;
+        console.warn("Saving with photo failed; retrying without it", err);
+        receipt = await saveCapture({ ...fields, photoBlob: null });
+      }
       lastSaved.current = receipt;
       // Fire-and-forget flush; no-ops when offline, retries on reconnect.
       void runPush();
@@ -107,6 +163,10 @@ export function AddReceipt({
         firstEver,
         cheer: savedCheer(),
       });
+    } catch (err) {
+      // Keep the entered amount/envelope so the user can retry; the finally
+      // re-enables the button so the form is never left stuck.
+      console.error("Failed to save receipt", err);
     } finally {
       setSaving(false);
     }
