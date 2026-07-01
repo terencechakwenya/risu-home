@@ -74,3 +74,37 @@ export async function compressPhoto(file: File): Promise<Blob> {
   });
   return encode(resized, targetW, targetH, file);
 }
+
+// Cap how long photo compression may run. A low-memory phone can kill or stall
+// the compression worker so its promise never settles; without this bound a save
+// (or edit) would hang forever and leave the Save button stuck disabled.
+const PHOTO_COMPRESS_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+// Prepare an optional receipt photo without ever blocking the caller. On any
+// failure or timeout, fall back to the original file (storing it skips the
+// memory-heavy canvas decode); the worst case is simply no photo. Never rejects.
+// Shared by the Add and Edit screens so both get the same memory-safe path.
+export async function preparePhoto(file: File | null): Promise<Blob | null> {
+  if (!file) return null;
+  try {
+    return await withTimeout(compressPhoto(file), PHOTO_COMPRESS_TIMEOUT_MS);
+  } catch {
+    return file;
+  }
+}

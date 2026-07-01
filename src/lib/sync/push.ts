@@ -25,6 +25,8 @@ export async function runPush(): Promise<void> {
           await pushRpc(supabase, item);
         } else if (item.table === "receipts" && item.op === "insert") {
           await pushReceipt(supabase, item);
+        } else if (item.table === "receipts" && item.op === "update") {
+          await pushReceiptUpdate(supabase, item);
         } else {
           await pushRow(supabase, item);
         }
@@ -69,6 +71,48 @@ async function pushReceipt(supabase: SupabaseClient, item: OutboxItem): Promise<
   // 3. Persist the path locally and drop the now-uploaded blob.
   await db.receipts.update(receiptId, { photo_path: payload.photo_path ?? null });
   await db.photos.delete(receiptId);
+}
+
+// Flush an edit to an already-synced receipt. Mirrors pushReceipt's photo
+// handling: on "replace" the new blob (kept in db.photos) is uploaded to the
+// same deterministic path and photo_path is set; on "remove" photo_path is
+// nulled; on "keep" the photo columns are left untouched. The envelope-spend
+// adjustment happens server-side in the receipts_bump_spent_update trigger.
+async function pushReceiptUpdate(supabase: SupabaseClient, item: OutboxItem): Promise<void> {
+  const payload = item.payload as {
+    id: string;
+    household_id: string;
+    envelope_id: string;
+    amount: number;
+    note: string | null;
+    _photo: "keep" | "replace" | "remove";
+  };
+  const { id, household_id, envelope_id, amount, note, _photo } = payload;
+
+  const fields: Record<string, unknown> = { envelope_id, amount, note };
+
+  if (_photo === "remove") {
+    fields.photo_path = null;
+  } else if (_photo === "replace") {
+    const photo = await db.photos.get(id);
+    if (photo) {
+      const path = `${household_id}/${id}.jpg`;
+      const { error: upErr } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .upload(path, photo.blob, { contentType: "image/jpeg", upsert: true });
+      if (upErr) throw upErr;
+      fields.photo_path = path;
+    }
+  }
+
+  const { error } = await supabase.from("receipts").update(fields).eq("id", id);
+  if (error) throw error;
+
+  // Reconcile the local mirror and drop the now-uploaded blob.
+  if (_photo === "replace") await db.photos.delete(id);
+  if (_photo !== "keep") {
+    await db.receipts.update(id, { photo_path: (fields.photo_path ?? null) as string | null });
+  }
 }
 
 // Generic insert/update/delete for envelopes / fixed_items / households.

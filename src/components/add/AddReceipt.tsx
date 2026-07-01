@@ -6,7 +6,7 @@ import { Camera, Check, ImagePlus, X, Loader2, Undo2 } from "lucide-react";
 import { db } from "@/lib/db/dexie";
 import { saveCapture, undoCapture } from "@/lib/db/receipts";
 import { runPush } from "@/lib/sync";
-import { compressPhoto } from "@/lib/photo";
+import { preparePhoto } from "@/lib/photo";
 import { clearDraft, loadDraft, saveDraft } from "@/lib/draft";
 import { celebrate } from "@/lib/confetti";
 import { savedCheer, FIRST_RECEIPT_TITLE, FIRST_RECEIPT_BODY } from "@/lib/domain/cheer";
@@ -18,39 +18,6 @@ interface SavedState {
   playful: boolean; // Pearl gets the celebration; Terence stays plain
   firstEver: boolean;
   cheer: string;
-}
-
-// Cap how long photo compression may run. A low-memory phone can kill or stall
-// the compression web worker so its promise never settles; without this bound
-// the save would hang forever and leave the Save button stuck disabled.
-const PHOTO_COMPRESS_TIMEOUT_MS = 15_000;
-
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timeout")), ms);
-    p.then(
-      (v) => {
-        clearTimeout(timer);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(timer);
-        reject(e);
-      },
-    );
-  });
-}
-
-// Prepare the optional receipt photo without ever blocking the save. On any
-// failure or timeout, fall back to the original file (storing it skips the
-// memory-heavy canvas decode); the worst case is simply no photo. Never rejects.
-async function preparePhoto(file: File | null): Promise<Blob | null> {
-  if (!file) return null;
-  try {
-    return await withTimeout(compressPhoto(file), PHOTO_COMPRESS_TIMEOUT_MS);
-  } catch {
-    return file;
-  }
 }
 
 // Add receipt: amount → envelope chip → photo → note → save. The save is fully
